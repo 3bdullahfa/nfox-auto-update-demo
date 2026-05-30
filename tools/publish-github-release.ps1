@@ -19,6 +19,21 @@ function Require-Command {
     }
 }
 
+function Test-GhCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    try {
+        & gh @Arguments 2>$null | Out-Null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
 Require-Command -Name "gh"
 
 & gh auth status | Out-Host
@@ -35,8 +50,7 @@ if ([string]::IsNullOrWhiteSpace($ReleaseTitle)) {
 }
 
 $fullRepo = "$Owner/$Repo"
-& gh repo view $fullRepo 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+if (-not (Test-GhCommand -Arguments @("repo", "view", $fullRepo))) {
     if (-not $AutoCreateRepository) {
         throw "Repository does not exist: $fullRepo. Re-run with -AutoCreateRepository to create it."
     }
@@ -68,8 +82,7 @@ foreach ($asset in $assets) {
     }
 }
 
-& gh release view $tag --repo $fullRepo 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {
+if (Test-GhCommand -Arguments @("release", "view", $tag, "--repo", $fullRepo)) {
     & gh release edit $tag --repo $fullRepo --title $ReleaseTitle --notes "NFOX Auto Update Demo $tag"
     & gh release upload $tag --repo $fullRepo $assets --clobber
 }
