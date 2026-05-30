@@ -56,10 +56,10 @@ if (-not $SkipBuild) {
 
 $artifactDir = Join-Path $root "artifacts\releases\$tag"
 $assets = @(
-    Join-Path $artifactDir "manifest.json",
-    Join-Path $artifactDir "NFOX.DemoApp-$Version.zip",
-    Join-Path $artifactDir "NFOX.Migrations-$Version.zip",
-    Join-Path $artifactDir "checksums.txt"
+    (Join-Path $artifactDir "manifest.json"),
+    (Join-Path $artifactDir "NFOX.DemoApp-$Version.zip"),
+    (Join-Path $artifactDir "NFOX.Migrations-$Version.zip"),
+    (Join-Path $artifactDir "checksums.txt")
 )
 
 foreach ($asset in $assets) {
