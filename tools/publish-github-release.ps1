@@ -35,7 +35,7 @@ if ([string]::IsNullOrWhiteSpace($ReleaseTitle)) {
 }
 
 $fullRepo = "$Owner/$Repo"
-& gh repo view $fullRepo | Out-Null
+& gh repo view $fullRepo 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
     if (-not $AutoCreateRepository) {
         throw "Repository does not exist: $fullRepo. Re-run with -AutoCreateRepository to create it."
@@ -68,7 +68,7 @@ foreach ($asset in $assets) {
     }
 }
 
-& gh release view $tag --repo $fullRepo | Out-Null
+& gh release view $tag --repo $fullRepo 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
     & gh release edit $tag --repo $fullRepo --title $ReleaseTitle --notes "NFOX Auto Update Demo $tag"
     & gh release upload $tag --repo $fullRepo $assets --clobber
