@@ -1,0 +1,22 @@
+{
+  "appName": "NFOX ERP Demo",
+  "updateName": "إضافة الرقم الضريبي للعملاء",
+  "latestAppVersion": "1.0.1",
+  "minimumRequiredAppVersion": "1.0.0",
+  "targetDbVersion": "2026.05.30.002",
+  "isRequired": false,
+  "releaseNotes": "Adds tax_no column to customers and displays it in the customer grid.",
+  "publishedAt": "2026-05-30T00:00:00Z",
+  "packages": {
+    "app": {
+      "fileName": "NFOX.DemoApp-1.0.1.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    },
+    "migrations": {
+      "fileName": "NFOX.Migrations-1.0.1.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    }
+  }
+}

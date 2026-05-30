@@ -1,0 +1,22 @@
+{
+  "appName": "NFOX ERP Demo",
+  "updateName": "Initial Release",
+  "latestAppVersion": "1.0.0",
+  "minimumRequiredAppVersion": "1.0.0",
+  "targetDbVersion": "2026.05.30.001",
+  "isRequired": false,
+  "releaseNotes": "Initial demo release with customer table and migration history.",
+  "publishedAt": "2026-05-30T00:00:00Z",
+  "packages": {
+    "app": {
+      "fileName": "NFOX.DemoApp-1.0.0.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    },
+    "migrations": {
+      "fileName": "NFOX.Migrations-1.0.0.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    }
+  }
+}

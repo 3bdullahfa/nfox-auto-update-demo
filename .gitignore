@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+logs/
+downloads/
+backups/
+artifacts/
+*.user
+*.suo
+.env
