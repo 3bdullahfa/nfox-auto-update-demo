@@ -20,6 +20,22 @@ public static class ProcessService
         Process.Start(info);
     }
 
+    public static void StartProcessWithArguments(string fileName, IEnumerable<string> arguments, string? workingDirectory = null)
+    {
+        var info = new ProcessStartInfo(fileName)
+        {
+            UseShellExecute = false,
+            WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(fileName) ?? AppContext.BaseDirectory
+        };
+
+        foreach (var argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        Process.Start(info);
+    }
+
     public static void OpenFolder(string directory)
     {
         Directory.CreateDirectory(directory);

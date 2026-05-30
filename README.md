@@ -97,13 +97,53 @@ Copy the printed manifest URL into:
 src/NFOX.DemoUpdater/appsettings.json
 ```
 
-or into the published updater `appsettings.json`, then run:
+or into the published updater `appsettings.json`, then start the update from the main app:
 
 ```powershell
-dotnet run --project .\src\NFOX.DemoUpdater\NFOX.DemoUpdater.csproj
+dotnet run --project .\src\NFOX.DemoApp\NFOX.DemoApp.csproj
 ```
 
-Click `Check`, then `Download and Update`.
+Click `Check for Update` in `NFOX.DemoApp`; do not run the updater manually.
+
+## Update from Main App UI
+
+The intended demo flow is:
+
+```text
+Run NFOX.DemoApp.exe -> click Check for Update -> NFOX.DemoUpdater.exe opens
+```
+
+Recommended published layout:
+
+```text
+install/
+  NFOX.DemoApp/
+    NFOX.DemoApp.exe
+    appsettings.json
+  NFOX.DemoUpdater/
+    NFOX.DemoUpdater.exe
+    appsettings.json
+```
+
+`NFOX.DemoApp` resolves `UpdaterPath` relative to the app executable directory. If the configured path is missing, it also searches common sibling layouts, including `..\NFOX.DemoUpdater\NFOX.DemoUpdater.exe`, `.\NFOX.DemoUpdater.exe`, and sibling published/source updater folders.
+
+The `Check for Update` button passes the install directory, current app version, and app config path to the updater. You should not need to run the updater manually from PowerShell.
+
+To test from published folders:
+
+```powershell
+.\tools\build-release.ps1 -Version "1.0.0"
+.\tools\create-local-release.ps1 -Version "1.0.1"
+
+$install = "F:\NFOX_UPDATE\NFOX.AutoUpdateDemo\install"
+New-Item -ItemType Directory -Path "$install\NFOX.DemoApp", "$install\NFOX.DemoUpdater" -Force
+Expand-Archive .\artifacts\releases\v1.0.0\NFOX.DemoApp-1.0.0.zip -DestinationPath "$install\NFOX.DemoApp" -Force
+Copy-Item .\artifacts\publish\v1.0.0\NFOX.DemoUpdater\* "$install\NFOX.DemoUpdater" -Recurse -Force
+
+& "$install\NFOX.DemoApp\NFOX.DemoApp.exe"
+```
+
+Then click `Check for Update`, click `Check` in the updater, then `Download and Update`.
 
 ## Publish to GitHub Releases
 

@@ -7,6 +7,7 @@ namespace NFOX.DemoUpdater;
 
 public partial class UpdaterForm : Form
 {
+    private readonly Dictionary<string, string> _startupArguments;
     private readonly string _configPath;
     private readonly LogService _logger;
     private readonly DownloadService _downloader = new();
@@ -18,9 +19,10 @@ public partial class UpdaterForm : Form
     private string _installDirectory = "";
     private CancellationTokenSource? _cancellationTokenSource;
 
-    public UpdaterForm()
+    public UpdaterForm(string[]? args = null)
     {
         InitializeComponent();
+        _startupArguments = ParseArguments(args ?? []);
         _configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
         _configDirectory = Path.GetDirectoryName(_configPath) ?? AppContext.BaseDirectory;
         _logger = new LogService("updater");
@@ -235,8 +237,12 @@ public partial class UpdaterForm : Form
     private void LoadLocalState()
     {
         _config = ConfigService.Load<UpdaterConfig>(_configPath);
+        ApplyStartupArguments(_config);
         _installDirectory = ConfigService.ResolvePath(_configDirectory, _config.InstallDirectory);
-        var appConfigPath = Path.Combine(_installDirectory, "appsettings.json");
+        var appConfigPathOverride = GetArgumentValue("app-config-path") ?? GetArgumentValue("config-path");
+        var appConfigPath = string.IsNullOrWhiteSpace(appConfigPathOverride)
+            ? Path.Combine(_installDirectory, "appsettings.json")
+            : ConfigService.ResolvePath(_configDirectory, appConfigPathOverride);
         _currentAppConfig = File.Exists(appConfigPath) ? ConfigService.Load<AppConfig>(appConfigPath) : null;
         lblCurrentVersion.Text = GetCurrentAppVersion();
         lblLatestVersion.Text = _manifest?.LatestAppVersion ?? "-";
@@ -259,7 +265,64 @@ public partial class UpdaterForm : Form
 
     private string GetCurrentAppVersion()
     {
-        return _currentAppConfig?.AppVersion ?? _config?.CurrentAppVersion ?? "0.0.0";
+        return _currentAppConfig?.AppVersion ?? GetArgumentValue("current-app-version") ?? _config?.CurrentAppVersion ?? "0.0.0";
+    }
+
+    private void ApplyStartupArguments(UpdaterConfig config)
+    {
+        var installDirectory = GetArgumentValue("install-dir");
+        if (!string.IsNullOrWhiteSpace(installDirectory))
+        {
+            config.InstallDirectory = installDirectory;
+        }
+
+        var currentVersion = GetArgumentValue("current-app-version");
+        if (!string.IsNullOrWhiteSpace(currentVersion))
+        {
+            config.CurrentAppVersion = currentVersion;
+        }
+    }
+
+    private string? GetArgumentValue(string name)
+    {
+        return _startupArguments.TryGetValue(name, out var value) ? value : null;
+    }
+
+    private static Dictionary<string, string> ParseArguments(string[] args)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < args.Length; i++)
+        {
+            var token = args[i];
+            if (!token.StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var keyValue = token[2..].Split('=', 2);
+            var key = keyValue[0].Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            if (keyValue.Length == 2)
+            {
+                result[key] = keyValue[1];
+                continue;
+            }
+
+            if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                result[key] = args[++i];
+            }
+            else
+            {
+                result[key] = "true";
+            }
+        }
+
+        return result;
     }
 
     private void SetDownloadProgress(double value)

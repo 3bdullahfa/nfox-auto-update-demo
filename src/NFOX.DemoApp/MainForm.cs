@@ -32,17 +32,24 @@ public partial class MainForm : Form
         try
         {
             EnsureConfigLoaded();
-            var configDirectory = Path.GetDirectoryName(_configPath) ?? AppContext.BaseDirectory;
-            var updaterPath = ConfigService.ResolvePath(configDirectory, _config!.UpdaterPath);
-            if (!File.Exists(updaterPath))
+            var updaterResolution = ResolveUpdaterPath(_config!.UpdaterPath);
+            if (updaterResolution.Path is null)
             {
-                MessageBox.Show($"Updater executable was not found:{Environment.NewLine}{updaterPath}", "Updater not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                _logger.Warning("Updater", $"Updater executable was not found: {updaterPath}");
+                var searchedPaths = string.Join(Environment.NewLine, updaterResolution.SearchedPaths.Select(path => $"  - {path}"));
+                var message = $"NFOX.DemoUpdater.exe was not found.{Environment.NewLine}{Environment.NewLine}" +
+                    $"Expected layout:{Environment.NewLine}" +
+                    $"install\\NFOX.DemoApp\\NFOX.DemoApp.exe{Environment.NewLine}" +
+                    $"install\\NFOX.DemoUpdater\\NFOX.DemoUpdater.exe{Environment.NewLine}{Environment.NewLine}" +
+                    $"Searched paths:{Environment.NewLine}{searchedPaths}";
+                MessageBox.Show(message, "Updater not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _logger.Warning("Updater", message);
                 return;
             }
 
+            var updaterPath = updaterResolution.Path;
+            var arguments = BuildUpdaterArguments();
             _logger.Info("Updater", $"Launching updater: {updaterPath}");
-            ProcessService.StartProcess(updaterPath, null, Path.GetDirectoryName(updaterPath));
+            ProcessService.StartProcessWithArguments(updaterPath, arguments, Path.GetDirectoryName(updaterPath));
             BeginInvoke(new Action(Close));
         }
         catch (Exception ex)
@@ -103,4 +110,77 @@ public partial class MainForm : Form
     {
         _config ??= ConfigService.Load<AppConfig>(_configPath);
     }
+
+    private UpdaterResolution ResolveUpdaterPath(string configuredUpdaterPath)
+    {
+        var appDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        var searchedPaths = new List<string>();
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(configuredUpdaterPath))
+        {
+            candidates.Add(Path.IsPathRooted(configuredUpdaterPath)
+                ? configuredUpdaterPath
+                : Path.Combine(appDirectory, configuredUpdaterPath));
+        }
+
+        candidates.Add(Path.Combine(appDirectory, "..", "NFOX.DemoUpdater", "NFOX.DemoUpdater.exe"));
+        candidates.Add(Path.Combine(appDirectory, "NFOX.DemoUpdater.exe"));
+
+        foreach (var sibling in GetSiblingUpdaterCandidates(appDirectory))
+        {
+            candidates.Add(sibling);
+        }
+
+        foreach (var candidate in candidates)
+        {
+            var fullPath = Path.GetFullPath(candidate);
+            if (searchedPaths.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            searchedPaths.Add(fullPath);
+            if (File.Exists(fullPath))
+            {
+                return new UpdaterResolution(fullPath, searchedPaths);
+            }
+        }
+
+        return new UpdaterResolution(null, searchedPaths);
+    }
+
+    private static IEnumerable<string> GetSiblingUpdaterCandidates(string appDirectory)
+    {
+        var current = new DirectoryInfo(appDirectory);
+        while (current is not null)
+        {
+            var parent = current.Parent;
+            if (parent is not null)
+            {
+                var sibling = Path.Combine(parent.FullName, "NFOX.DemoUpdater");
+                yield return Path.Combine(sibling, "NFOX.DemoUpdater.exe");
+                yield return Path.Combine(sibling, "bin", "Release", "net8.0-windows", "NFOX.DemoUpdater.exe");
+                yield return Path.Combine(sibling, "bin", "Debug", "net8.0-windows", "NFOX.DemoUpdater.exe");
+            }
+
+            current = parent;
+        }
+    }
+
+    private string[] BuildUpdaterArguments()
+    {
+        var appDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        return new[]
+        {
+            "--install-dir",
+            appDirectory,
+            "--current-app-version",
+            _config!.AppVersion,
+            "--app-config-path",
+            _configPath
+        };
+    }
+
+    private sealed record UpdaterResolution(string? Path, List<string> SearchedPaths);
 }

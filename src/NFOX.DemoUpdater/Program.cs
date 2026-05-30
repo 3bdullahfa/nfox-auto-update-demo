@@ -3,9 +3,9 @@ namespace NFOX.DemoUpdater;
 internal static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new UpdaterForm());
+        Application.Run(new UpdaterForm(args));
     }    
 }
