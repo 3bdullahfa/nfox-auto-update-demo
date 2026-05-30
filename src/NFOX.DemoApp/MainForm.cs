@@ -1,6 +1,7 @@
 using NFOX.Shared.Database;
 using NFOX.Shared.Models;
 using NFOX.Shared.Services;
+using System.Globalization;
 
 namespace NFOX.DemoApp;
 
@@ -127,18 +128,28 @@ public partial class MainForm : Form
             database.TestConnection();
             var dbVersion = database.GetCurrentSchemaVersion();
             var customers = database.LoadCustomers();
+            var invoices = database.LoadInvoices();
+            var invoiceSummary = database.GetInvoiceSummary();
 
             lblDbVersion.Text = dbVersion;
             lblConnection.Text = "Connected";
             lblConnection.ForeColor = Color.DarkGreen;
             gridCustomers.DataSource = customers;
-            _logger.Info("Startup", $"Loaded app {_config.AppVersion}, database version {dbVersion}, {customers.Rows.Count} customer rows.");
+            gridInvoices.DataSource = invoices;
+            lblInvoiceCount.Text = invoiceSummary.InvoiceCount.ToString(CultureInfo.InvariantCulture);
+            lblInvoiceTotal.Text = invoiceSummary.TotalAmount.ToString("N2", CultureInfo.InvariantCulture);
+            lblLatestInvoice.Text = invoiceSummary.LatestInvoiceDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-";
+            _logger.Info("Startup", $"Loaded app {_config.AppVersion}, database version {dbVersion}, {customers.Rows.Count} customer rows, {invoices.Rows.Count} invoice rows.");
         }
         catch (Exception ex)
         {
             lblConnection.Text = "Failed";
             lblConnection.ForeColor = Color.DarkRed;
             gridCustomers.DataSource = null;
+            gridInvoices.DataSource = null;
+            lblInvoiceCount.Text = "-";
+            lblInvoiceTotal.Text = "-";
+            lblLatestInvoice.Text = "-";
             _logger.Error("RefreshData", "Failed to load application data.", ex);
             MessageBox.Show(ex.Message, "Database or configuration error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }

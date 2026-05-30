@@ -106,6 +106,15 @@ The user starts the update from the main app by clicking:
 
 The updater then downloads packages from GitHub Releases, verifies SHA256, applies database migrations, replaces files only after migrations succeed, and relaunches the updated app.
 
+Latest demo update:
+
+```text
+Version: 1.0.2
+Update: إضافة شاشة الفواتير وملخص المبيعات
+DB target: 2026.06.01.001
+Visible change: Invoices / الفواتير tab with invoice data and sales summary.
+```
+
 ## Build Version 1.0.1
 
 ```powershell

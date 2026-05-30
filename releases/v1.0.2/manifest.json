@@ -1,0 +1,22 @@
+{
+  "appName": "NFOX ERP Demo",
+  "updateName": "إضافة شاشة الفواتير وملخص المبيعات",
+  "latestAppVersion": "1.0.2",
+  "minimumRequiredAppVersion": "1.0.1",
+  "targetDbVersion": "2026.06.01.001",
+  "isRequired": false,
+  "releaseNotes": "تمت إضافة شاشة الفواتير، وجدول الفواتير في قاعدة البيانات، وملخص إجمالي المبيعات وعدد الفواتير في واجهة النظام.",
+  "publishedAt": "2026-06-01T00:00:00Z",
+  "packages": {
+    "app": {
+      "fileName": "NFOX.DemoApp-1.0.2.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    },
+    "migrations": {
+      "fileName": "NFOX.Migrations-1.0.2.zip",
+      "downloadUrl": "PUT_GITHUB_ASSET_URL_HERE",
+      "sha256": "TO_BE_GENERATED_BY_BUILD_SCRIPT"
+    }
+  }
+}

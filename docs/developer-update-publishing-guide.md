@@ -144,3 +144,64 @@ The user should not manually edit manifest URLs or run `NFOX.DemoUpdater.exe` fr
 - Keep backups.
 - Test locally before publishing to GitHub.
 - Do not use public GitHub Releases for production ERP binaries.
+
+## Example: Publishing version 1.0.2 with app and database changes
+
+Version `1.0.2` adds the invoices UI and the database objects needed by that screen.
+
+1. Change app version and update name:
+
+```json
+{
+  "appVersion": "1.0.2",
+  "updateName": "إضافة شاشة الفواتير وملخص المبيعات"
+}
+```
+
+2. Add migration file:
+
+```text
+releases/v1.0.2/migrations/2026.06.01.001__add_invoices_module.sql
+```
+
+The migration creates `invoices`, adds `customers.customer_category`, and seeds demo invoices.
+
+3. Build release artifacts:
+
+```powershell
+.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-demo"
+```
+
+4. Publish GitHub Release:
+
+```powershell
+.\tools\publish-github-release.ps1 -Owner "3bdullahfa" -Repo "nfox-auto-update-demo" -Version "1.0.2" -ReleaseTitle "NFOX Demo v1.0.2"
+```
+
+5. Verify GitHub assets:
+
+```powershell
+gh release view v1.0.2 --repo 3bdullahfa/nfox-auto-update-demo
+```
+
+Expected assets:
+
+```text
+manifest.json
+NFOX.DemoApp-1.0.2.zip
+NFOX.Migrations-1.0.2.zip
+checksums.txt
+```
+
+6. Test client update from UI:
+
+```text
+Run NFOX.DemoApp.exe -> wait for the GitHub update panel -> click تحديث الآن
+```
+
+7. Safety notes:
+
+- Test locally before publishing.
+- Do not modify already-applied migrations.
+- Publish forward-fix migrations if something goes wrong.
+- Keep database backups before production updates.
