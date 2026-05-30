@@ -79,6 +79,10 @@ else {
 
 Write-Host "Release page:"
 Write-Host "https://github.com/$fullRepo/releases/tag/$tag"
+Write-Host "Latest manifest URL:"
+Write-Host "https://github.com/$fullRepo/releases/latest/download/manifest.json"
+Write-Host "Version-specific manifest URL:"
+Write-Host "https://github.com/$fullRepo/releases/download/$tag/manifest.json"
 Write-Host "Download URLs:"
 Write-Host "https://github.com/$fullRepo/releases/download/$tag/manifest.json"
 Write-Host "https://github.com/$fullRepo/releases/download/$tag/NFOX.DemoApp-$Version.zip"

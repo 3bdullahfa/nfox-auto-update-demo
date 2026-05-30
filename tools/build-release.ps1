@@ -19,6 +19,12 @@ $migrationZip = Join-Path $artifactDir "NFOX.Migrations-$Version.zip"
 $checksumsFile = Join-Path $artifactDir "checksums.txt"
 $manifestFile = Join-Path $artifactDir "manifest.json"
 $migrationSource = Join-Path $root "releases\$tag\migrations"
+$manifestTemplateFile = Join-Path $root "releases\$tag\manifest.json"
+
+function Read-JsonFile {
+    param([string]$Path)
+    return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+}
 
 function Get-UpdateName {
     param([string]$ReleaseVersion)
@@ -75,14 +81,26 @@ finally {
 
 $updateName = Get-UpdateName -ReleaseVersion $Version
 $targetDbVersion = Get-TargetDbVersion -Directory $migrationSource
+$releaseNotes = if ($Version -eq "1.0.1") { "Adds tax_no column to customers and displays it in the customer grid." } else { "Initial demo release with customer table and migration history." }
+$minimumRequiredAppVersion = "1.0.0"
+$isRequired = $false
+$publishedAt = "2026-05-30T00:00:00Z"
+if (Test-Path -LiteralPath $manifestTemplateFile) {
+    $template = Read-JsonFile -Path $manifestTemplateFile
+    if ($template.updateName) { $updateName = $template.updateName }
+    if ($template.releaseNotes) { $releaseNotes = $template.releaseNotes }
+    if ($template.minimumRequiredAppVersion) { $minimumRequiredAppVersion = $template.minimumRequiredAppVersion }
+    if ($null -ne $template.isRequired) { $isRequired = [bool]$template.isRequired }
+    if ($template.publishedAt) { $publishedAt = $template.publishedAt }
+}
 $appSettingsFile = Join-Path $appPublishDir "appsettings.json"
-$appSettings = Get-Content -LiteralPath $appSettingsFile -Raw | ConvertFrom-Json
+$appSettings = Read-JsonFile -Path $appSettingsFile
 $appSettings.appVersion = $Version
 $appSettings.updateName = $updateName
 $appSettings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $appSettingsFile -Encoding UTF8
 
 $updaterSettingsFile = Join-Path $updaterPublishDir "appsettings.json"
-$updaterSettings = Get-Content -LiteralPath $updaterSettingsFile -Raw | ConvertFrom-Json
+$updaterSettings = Read-JsonFile -Path $updaterSettingsFile
 $updaterSettings.currentAppVersion = $Version
 $updaterSettings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $updaterSettingsFile -Encoding UTF8
 
@@ -104,11 +122,11 @@ $manifest = [ordered]@{
     appName = "NFOX ERP Demo"
     updateName = $updateName
     latestAppVersion = $Version
-    minimumRequiredAppVersion = "1.0.0"
+    minimumRequiredAppVersion = $minimumRequiredAppVersion
     targetDbVersion = $targetDbVersion
-    isRequired = $false
-    releaseNotes = if ($Version -eq "1.0.1") { "Adds tax_no column to customers and displays it in the customer grid." } else { "Initial demo release with customer table and migration history." }
-    publishedAt = "2026-05-30T00:00:00Z"
+    isRequired = $isRequired
+    releaseNotes = $releaseNotes
+    publishedAt = $publishedAt
     packages = [ordered]@{
         app = [ordered]@{
             fileName = "NFOX.DemoApp-$Version.zip"

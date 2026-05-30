@@ -4,7 +4,7 @@ namespace NFOX.Shared.Services;
 
 public sealed class DownloadService
 {
-    private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient = CreateHttpClient();
 
     public async Task<string> GetStringAsync(string url, CancellationToken cancellationToken)
     {
@@ -13,7 +13,8 @@ public sealed class DownloadService
             return await File.ReadAllTextAsync(localPath, cancellationToken);
         }
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(cancellationToken);
     }
@@ -33,7 +34,6 @@ public sealed class DownloadService
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("NFOX-AutoUpdateDemo", "1.0"));
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -90,5 +90,12 @@ public sealed class DownloadService
         }
 
         progress?.Report(100);
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("NFOX-AutoUpdateDemo", "1.0"));
+        return client;
     }
 }

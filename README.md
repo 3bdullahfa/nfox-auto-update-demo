@@ -6,8 +6,11 @@ Proof of concept for a Windows Forms accounting/ERP-style application that updat
 
 ```text
 NFOX.DemoApp
-  -> launches NFOX.DemoUpdater
-      -> reads manifest.json from file:/// or GitHub Releases
+  -> checks GitHub Releases automatically on startup
+  -> shows an in-app update notification when a newer version exists
+  -> launches NFOX.DemoUpdater when the user clicks تحديث الآن
+      -> discovers the latest GitHub release
+      -> downloads manifest.json from GitHub Releases
       -> downloads ZIP packages
       -> verifies SHA256
       -> backs up current app folder
@@ -66,6 +69,42 @@ Expected values:
 - Update name: `Initial Release`
 - Database version: `2026.05.30.001`
 - Customer rows: 3
+- The app checks GitHub automatically and shows an update notification when a newer release is available.
+
+## GitHub Automatic Update Flow
+
+GitHub is the default update channel for this proof of concept:
+
+```text
+Owner: 3bdullahfa
+Repo: nfox-auto-update-demo
+Latest manifest: https://github.com/3bdullahfa/nfox-auto-update-demo/releases/latest/download/manifest.json
+```
+
+`NFOX.DemoApp` reads its local version from `appsettings.json`, checks GitHub Releases on startup, downloads the latest `manifest.json`, and compares versions using semantic version comparison.
+
+If no update exists, the app shows:
+
+```text
+النظام محدث
+```
+
+If an update exists, the main app shows an update panel with:
+
+- Current version.
+- New version.
+- Update name.
+- Release notes.
+- Target database version.
+- Whether the update is required.
+
+The user starts the update from the main app by clicking:
+
+```text
+تحديث الآن
+```
+
+The updater then downloads packages from GitHub Releases, verifies SHA256, applies database migrations, replaces files only after migrations succeed, and relaunches the updated app.
 
 ## Build Version 1.0.1
 
@@ -85,7 +124,7 @@ artifacts/releases/v1.0.1/
 
 ## Test Update Locally
 
-Create a local release manifest with `file:///` package URLs:
+Local `file:///` manifest support remains available only for developer testing. Create a local release manifest with `file:///` package URLs:
 
 ```powershell
 .\tools\create-local-release.ps1 -Version "1.0.1"
@@ -103,7 +142,7 @@ or into the published updater `appsettings.json`, then start the update from the
 dotnet run --project .\src\NFOX.DemoApp\NFOX.DemoApp.csproj
 ```
 
-Click `Check for Update` in `NFOX.DemoApp`; do not run the updater manually.
+Click `Check for Update` or use the automatic startup check in `NFOX.DemoApp`; do not run the updater manually.
 
 ## Update from Main App UI
 
@@ -168,8 +207,10 @@ gh api user --jq .login
 The updater manifest URL for a public repo is:
 
 ```text
-https://github.com/<OWNER>/nfox-auto-update-demo/releases/download/v1.0.1/manifest.json
+https://github.com/<OWNER>/nfox-auto-update-demo/releases/latest/download/manifest.json
 ```
+
+Detailed developer publishing steps are documented in [docs/developer-update-publishing-guide.md](docs/developer-update-publishing-guide.md).
 
 ## GitHub Repository Setup
 

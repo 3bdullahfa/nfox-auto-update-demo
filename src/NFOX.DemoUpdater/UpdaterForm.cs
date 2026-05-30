@@ -1,4 +1,3 @@
-using System.Text.Json;
 using NFOX.Shared.Database;
 using NFOX.Shared.Models;
 using NFOX.Shared.Services;
@@ -11,6 +10,7 @@ public partial class UpdaterForm : Form
     private readonly string _configPath;
     private readonly LogService _logger;
     private readonly DownloadService _downloader = new();
+    private readonly UpdateDiscoveryService _updateDiscovery = new();
     private readonly BackupService _backupService = new();
     private UpdaterConfig? _config;
     private AppConfig? _currentAppConfig;
@@ -18,6 +18,7 @@ public partial class UpdaterForm : Form
     private string _configDirectory = "";
     private string _installDirectory = "";
     private CancellationTokenSource? _cancellationTokenSource;
+    private bool _isCriticalStage;
 
     public UpdaterForm(string[]? args = null)
     {
@@ -34,6 +35,10 @@ public partial class UpdaterForm : Form
         {
             LoadLocalState();
             AppendStatus("Updater loaded.");
+            if (ShouldAutoCheckOnStartup())
+            {
+                BeginInvoke(new Action(async () => await CheckForUpdateAsync()));
+            }
         }
         catch (Exception ex)
         {
@@ -53,6 +58,13 @@ public partial class UpdaterForm : Form
 
     private void btnCancel_Click(object? sender, EventArgs e)
     {
+        if (_isCriticalStage)
+        {
+            AppendStatus("Cancel is disabled during database migration or file replacement.");
+            MessageBox.Show("لا يمكن إلغاء التحديث أثناء تحديث قاعدة البيانات أو استبدال الملفات.", "Update in progress", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         _cancellationTokenSource?.Cancel();
         AppendStatus("Cancellation requested.");
     }
@@ -72,11 +84,6 @@ public partial class UpdaterForm : Form
         await RunUiOperationAsync(async cancellationToken =>
         {
             LoadLocalState();
-            if (_config!.ManifestUrl.Contains("PUT_GITHUB_RELEASE_MANIFEST_URL_HERE", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("ManifestUrl is still a placeholder. Set it to a file:/// URL or a GitHub release manifest URL.");
-            }
-
             await LoadManifestAsync(cancellationToken);
 
             var currentVersion = GetCurrentAppVersion();
@@ -87,6 +94,7 @@ public partial class UpdaterForm : Form
             else
             {
                 AppendStatus("No update available.");
+                btnDownloadUpdate.Enabled = false;
             }
         });
     }
@@ -123,20 +131,24 @@ public partial class UpdaterForm : Form
 
             AppendStatus("Downloading app package.");
             await _downloader.DownloadFileAsync(_manifest.Packages.App.DownloadUrl, appPackagePath, new Progress<double>(SetDownloadProgress), cancellationToken);
+            AppendStatus("Verifying app package SHA256.");
             FileHashService.VerifySha256(appPackagePath, _manifest.Packages.App.Sha256);
             AppendStatus("App package hash verified.");
 
             AppendStatus("Downloading migration package.");
             await _downloader.DownloadFileAsync(_manifest.Packages.Migrations.DownloadUrl, migrationPackagePath, new Progress<double>(SetDownloadProgress), cancellationToken);
+            AppendStatus("Verifying migration package SHA256.");
             FileHashService.VerifySha256(migrationPackagePath, _manifest.Packages.Migrations.Sha256);
             AppendStatus("Migration package hash verified.");
 
+            AppendStatus("Creating backup.");
             var backupPath = _backupService.CreateBackup(_installDirectory, backupDirectory);
             AppendStatus($"Backup created: {backupPath}");
 
             var migrationsExtractDirectory = Path.Combine(downloadDirectory, $"migrations-{_manifest.LatestAppVersion}");
             ZipService.ExtractToDirectory(migrationPackagePath, migrationsExtractDirectory, true);
             AppendStatus("Applying database migrations.");
+            EnterCriticalStage();
 
             var provider = DatabaseProviderFactory.Create(_config.DatabaseProvider);
             var migrationLogger = new LogService("migration", _logger.LogDirectory);
@@ -194,25 +206,22 @@ public partial class UpdaterForm : Form
 
     private async Task LoadManifestAsync(CancellationToken cancellationToken)
     {
-        if (_config!.ManifestUrl.Contains("PUT_GITHUB_RELEASE_MANIFEST_URL_HERE", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("ManifestUrl is still a placeholder. Set it to a file:/// URL or a GitHub release manifest URL.");
-        }
-
-        AppendStatus($"Loading manifest from {_config!.ManifestUrl}");
-        var manifestJson = await _downloader.GetStringAsync(_config.ManifestUrl, cancellationToken);
-        _manifest = JsonSerializer.Deserialize<UpdateManifest>(manifestJson, ConfigService.JsonOptions)
-            ?? throw new InvalidOperationException("Manifest JSON is empty or invalid.");
+        AppendStatus(_config!.UpdateSource.Equals("GitHub", StringComparison.OrdinalIgnoreCase)
+            ? $"Checking GitHub latest release for {_config.GitHubOwner}/{_config.GitHubRepo}."
+            : $"Loading manifest from {_config.ManifestUrl}");
+        _manifest = await _updateDiscovery.GetManifestAsync(_config, cancellationToken);
 
         lblLatestVersion.Text = _manifest.LatestAppVersion;
         lblTargetDb.Text = _manifest.TargetDbVersion;
         lblUpdateName.Text = _manifest.UpdateName;
-        txtReleaseNotes.Text = _manifest.ReleaseNotes;
+        txtReleaseNotes.Text = BuildManifestDetails(_manifest);
+        btnDownloadUpdate.Enabled = VersionService.IsNewer(GetCurrentAppVersion(), _manifest.LatestAppVersion);
     }
 
     private async Task RunUiOperationAsync(Func<CancellationToken, Task> operation)
     {
         SetBusy(true);
+        _isCriticalStage = false;
         _cancellationTokenSource = new CancellationTokenSource();
         try
         {
@@ -230,6 +239,7 @@ public partial class UpdaterForm : Form
         {
             _cancellationTokenSource.Dispose();
             _cancellationTokenSource = null;
+            _isCriticalStage = false;
             SetBusy(false);
         }
     }
@@ -280,6 +290,36 @@ public partial class UpdaterForm : Form
         if (!string.IsNullOrWhiteSpace(currentVersion))
         {
             config.CurrentAppVersion = currentVersion;
+        }
+
+        var updateSource = GetArgumentValue("update-source");
+        if (!string.IsNullOrWhiteSpace(updateSource))
+        {
+            config.UpdateSource = updateSource;
+        }
+
+        var githubOwner = GetArgumentValue("github-owner");
+        if (!string.IsNullOrWhiteSpace(githubOwner))
+        {
+            config.GitHubOwner = githubOwner;
+        }
+
+        var githubRepo = GetArgumentValue("github-repo");
+        if (!string.IsNullOrWhiteSpace(githubRepo))
+        {
+            config.GitHubRepo = githubRepo;
+        }
+
+        var manifestUrl = GetArgumentValue("manifest-url");
+        if (!string.IsNullOrWhiteSpace(manifestUrl))
+        {
+            config.ManifestUrl = manifestUrl;
+        }
+
+        var useLatestRelease = GetArgumentValue("github-use-latest-release");
+        if (bool.TryParse(useLatestRelease, out var parsedUseLatestRelease))
+        {
+            config.GitHubUseLatestRelease = parsedUseLatestRelease;
         }
     }
 
@@ -333,8 +373,8 @@ public partial class UpdaterForm : Form
     private void SetBusy(bool busy)
     {
         btnCheck.Enabled = !busy;
-        btnDownloadUpdate.Enabled = !busy;
-        btnCancel.Enabled = busy;
+        btnDownloadUpdate.Enabled = !busy && IsUpdateAvailable();
+        btnCancel.Enabled = busy && !_isCriticalStage;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }
 
@@ -347,8 +387,41 @@ public partial class UpdaterForm : Form
 
     private void HandleError(string operation, Exception exception)
     {
-        AppendStatus($"ERROR: {exception.Message}");
+        var userMessage = exception is HttpRequestException
+            ? "تعذر الاتصال بخادم التحديثات. لم يتم استبدال ملفات البرنامج ويمكنك استخدام الإصدار الحالي."
+            : exception.Message;
+        AppendStatus($"ERROR: {userMessage}");
         _logger.Error(operation, exception.Message, exception);
-        MessageBox.Show(exception.Message, "Updater error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show(userMessage, "Updater error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    private bool ShouldAutoCheckOnStartup()
+    {
+        return GetArgumentValue("auto-check")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true ||
+            _config?.UpdateSource.Equals("GitHub", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private bool IsUpdateAvailable()
+    {
+        return _manifest is not null && VersionService.IsNewer(GetCurrentAppVersion(), _manifest.LatestAppVersion);
+    }
+
+    private void EnterCriticalStage()
+    {
+        _isCriticalStage = true;
+        btnCancel.Enabled = false;
+    }
+
+    private static string BuildManifestDetails(UpdateManifest manifest)
+    {
+        var required = manifest.IsRequired ? "Yes" : "No";
+        return
+            $"Update name: {manifest.UpdateName}{Environment.NewLine}" +
+            $"Release notes: {manifest.ReleaseNotes}{Environment.NewLine}" +
+            $"Target DB version: {manifest.TargetDbVersion}{Environment.NewLine}" +
+            $"Required: {required}{Environment.NewLine}{Environment.NewLine}" +
+            "تنبيه مهم:" + Environment.NewLine +
+            "يرجى عدم إغلاق الجهاز أو إغلاق البرنامج أو فصل الإنترنت أثناء التحديث." + Environment.NewLine +
+            "سيتم تحديث ملفات البرنامج وقاعدة البيانات تلقائيًا.";
     }
 }
