@@ -1,6 +1,27 @@
 # Developer Update Publishing Guide
 
-This guide explains how to publish a new NFOX Auto Update Demo release through GitHub Releases.
+This guide explains how to build a new NFOX Auto Update Demo release from the source repository and publish compiled assets to the releases-only update channel.
+
+## Production-like Update Distribution
+
+The project uses two repositories:
+
+```text
+Source repository: 3bdullahfa/nfox-auto-update-demo
+Update channel:    3bdullahfa/nfox-auto-update-channel
+```
+
+The source repository is the developer workspace. It can contain source code, build scripts, docs, and migrations. The update channel is public for this proof of concept so clients can download assets without credentials, but it must not receive source code.
+
+The update channel should contain only:
+
+- A minimal README.
+- GitHub Releases.
+- Release assets: `manifest.json`, `NFOX.UpdatePackage-X.Y.Z.zip`, and `checksums.txt`.
+
+Do not publish `src/`, `.git/`, `database/`, `tools/`, `docs/`, `*.cs`, `*.csproj`, `*.sln`, or PowerShell source build scripts to the update channel.
+
+Public GitHub Releases are acceptable for the demo. For production ERP software, use a private update server, protected API, Azure Blob Storage or S3-compatible storage with signed URLs, a CDN with signed URLs, and signed packages. Compiled binaries can still be reverse-engineered, so this separation protects source distribution but is not complete intellectual-property protection.
 
 ## 1. Update App Version
 
@@ -14,8 +35,8 @@ Example:
 
 ```json
 {
-  "appVersion": "1.0.2",
-  "updateName": "اسم التحديث الجديد"
+  "appVersion": "1.0.3",
+  "updateName": "New update name"
 }
 ```
 
@@ -26,7 +47,7 @@ The build script also writes the selected `-Version` into the published app pack
 Add migration SQL files under:
 
 ```text
-releases/v1.0.2/migrations/
+releases/v1.0.3/migrations/
 ```
 
 Migration file names must follow:
@@ -38,7 +59,7 @@ YYYY.MM.DD.NNN__description.sql
 Example:
 
 ```text
-2026.06.01.001__add_invoice_notes.sql
+2026.06.01.002__add_invoice_notes.sql
 ```
 
 Migrations should be idempotent where possible.
@@ -55,17 +76,33 @@ Do not edit migrations that have already been applied on a client database. Publ
 ## 3. Build Release Artifacts
 
 ```powershell
-.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-demo"
+cd F:\NFOX_UPDATE\NFOX.AutoUpdateDemo
+
+dotnet build -c Release
+
+.\tools\build-release.ps1 `
+  -Version "1.0.3" `
+  -Owner "3bdullahfa" `
+  -Repo "nfox-auto-update-channel"
 ```
 
 Expected output:
 
 ```text
-artifacts/releases/v1.0.2/
+artifacts/releases/v1.0.3/
   manifest.json
-  NFOX.DemoApp-1.0.2.zip
-  NFOX.Migrations-1.0.2.zip
+  NFOX.UpdatePackage-1.0.3.zip
   checksums.txt
+```
+
+The ZIP should contain compiled binaries and migration output only:
+
+```text
+NFOX.UpdatePackage-1.0.3/
+  app/
+  updater/
+  migrations/
+  manifest.json
 ```
 
 ## 4. Review manifest.json
@@ -73,7 +110,7 @@ artifacts/releases/v1.0.2/
 Before publishing, review:
 
 ```text
-artifacts/releases/v1.0.2/manifest.json
+artifacts/releases/v1.0.3/manifest.json
 ```
 
 The manifest must contain:
@@ -82,43 +119,58 @@ The manifest must contain:
 - `updateName`
 - `targetDbVersion`
 - `releaseNotes`
-- `downloadUrl`
-- `sha256`
+- `packages.updatePackage.fileName`
+- `packages.updatePackage.downloadUrl`
+- `packages.updatePackage.sha256`
 
-The package URLs should point to GitHub release assets for the target version.
+The package URL should point to the update channel repository:
 
-## 5. Publish GitHub Release
-
-```powershell
-.\tools\publish-github-release.ps1 `
-  -Owner "3bdullahfa" `
-  -Repo "nfox-auto-update-demo" `
-  -Version "1.0.2" `
-  -ReleaseTitle "NFOX Demo v1.0.2"
+```text
+https://github.com/3bdullahfa/nfox-auto-update-channel/releases/download/v1.0.3/NFOX.UpdatePackage-1.0.3.zip
 ```
 
-The script uses the existing authenticated GitHub CLI session. It does not require client-side GitHub credentials and does not write tokens to app config.
+## 5. Publish Update Channel Release
+
+```powershell
+.\tools\publish-update-channel-release.ps1 `
+  -Owner "3bdullahfa" `
+  -Repo "nfox-auto-update-channel" `
+  -Version "1.0.3" `
+  -ReleaseTitle "NFOX Demo v1.0.3"
+```
+
+The script uses the existing authenticated GitHub CLI session. It checks `gh auth status`, creates `3bdullahfa/nfox-auto-update-channel` if missing, and uploads only release assets from `artifacts/releases/vX.Y.Z/`.
+
+The script does not use `--source .`, does not add a remote, and does not push the source tree.
 
 ## 6. Verify Release Assets
 
 ```powershell
-gh release view v1.0.2 --repo 3bdullahfa/nfox-auto-update-demo
+gh release view v1.0.3 --repo 3bdullahfa/nfox-auto-update-channel
 ```
 
 Expected assets:
 
 ```text
 manifest.json
-NFOX.DemoApp-1.0.2.zip
-NFOX.Migrations-1.0.2.zip
+NFOX.UpdatePackage-1.0.3.zip
 checksums.txt
 ```
 
 The stable client manifest URL is:
 
 ```text
-https://github.com/3bdullahfa/nfox-auto-update-demo/releases/latest/download/manifest.json
+https://github.com/3bdullahfa/nfox-auto-update-channel/releases/latest/download/manifest.json
 ```
+
+Verify that the update channel repository has no source tree:
+
+```powershell
+gh repo view 3bdullahfa/nfox-auto-update-channel
+gh api repos/3bdullahfa/nfox-auto-update-channel/contents --jq ".[].name"
+```
+
+Only a minimal `README.md` should be present in repository contents. The compiled artifacts should be release assets, not committed files.
 
 ## 7. Test Client Update
 
@@ -128,13 +180,18 @@ The client should only run:
 NFOX.DemoApp.exe
 ```
 
-The main app checks GitHub automatically. If an update exists, click:
+The main app checks the update channel automatically. If an update exists, click the in-app update button. The user should not manually edit manifest URLs or run `NFOX.DemoUpdater.exe` from PowerShell.
 
-```text
-تحديث الآن
-```
+The updater should:
 
-The user should not manually edit manifest URLs or run `NFOX.DemoUpdater.exe` from PowerShell.
+1. Discover the latest release in `3bdullahfa/nfox-auto-update-channel`.
+2. Download `manifest.json`.
+3. Download `NFOX.UpdatePackage-X.Y.Z.zip`.
+4. Verify SHA256 from the manifest.
+5. Extract `app/`, `updater/`, and `migrations/`.
+6. Apply database migrations.
+7. Replace application files.
+8. Relaunch `NFOX.DemoApp`.
 
 ## 8. Rollback and Safety Notes
 
@@ -143,65 +200,47 @@ The user should not manually edit manifest URLs or run `NFOX.DemoUpdater.exe` fr
 - If a migration is wrong, publish a new forward-fix migration.
 - Keep backups.
 - Test locally before publishing to GitHub.
+- Do not embed GitHub credentials in the client app.
 - Do not use public GitHub Releases for production ERP binaries.
 
 ## Example: Publishing version 1.0.2 with app and database changes
 
 Version `1.0.2` adds the invoices UI and the database objects needed by that screen.
 
-1. Change app version and update name:
-
-```json
-{
-  "appVersion": "1.0.2",
-  "updateName": "إضافة شاشة الفواتير وملخص المبيعات"
-}
-```
-
-2. Add migration file:
+1. Ensure the migration file exists:
 
 ```text
 releases/v1.0.2/migrations/2026.06.01.001__add_invoices_module.sql
 ```
 
-The migration creates `invoices`, adds `customers.customer_category`, and seeds demo invoices.
-
-3. Build release artifacts:
+2. Build release artifacts:
 
 ```powershell
-.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-demo"
+.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-channel"
 ```
 
-4. Publish GitHub Release:
+3. Publish the update-channel release:
 
 ```powershell
-.\tools\publish-github-release.ps1 -Owner "3bdullahfa" -Repo "nfox-auto-update-demo" -Version "1.0.2" -ReleaseTitle "NFOX Demo v1.0.2"
+.\tools\publish-update-channel-release.ps1 -Owner "3bdullahfa" -Repo "nfox-auto-update-channel" -Version "1.0.2" -ReleaseTitle "NFOX Demo v1.0.2"
 ```
 
-5. Verify GitHub assets:
+4. Verify GitHub assets:
 
 ```powershell
-gh release view v1.0.2 --repo 3bdullahfa/nfox-auto-update-demo
+gh release view v1.0.2 --repo 3bdullahfa/nfox-auto-update-channel
 ```
 
 Expected assets:
 
 ```text
 manifest.json
-NFOX.DemoApp-1.0.2.zip
-NFOX.Migrations-1.0.2.zip
+NFOX.UpdatePackage-1.0.2.zip
 checksums.txt
 ```
 
-6. Test client update from UI:
+5. Test client update from the UI:
 
 ```text
-Run NFOX.DemoApp.exe -> wait for the GitHub update panel -> click تحديث الآن
+Run NFOX.DemoApp.exe -> wait for the update panel -> click the in-app update button
 ```
-
-7. Safety notes:
-
-- Test locally before publishing.
-- Do not modify already-applied migrations.
-- Publish forward-fix migrations if something goes wrong.
-- Keep database backups before production updates.

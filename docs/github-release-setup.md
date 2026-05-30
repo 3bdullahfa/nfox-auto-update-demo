@@ -1,6 +1,11 @@
 # GitHub Release Setup
 
-This proof of concept uses GitHub Releases as a public test update server.
+This proof of concept uses GitHub Releases in a public releases-only update channel. The update channel is separate from the source repository.
+
+```text
+Source repository: 3bdullahfa/nfox-auto-update-demo
+Update channel:    3bdullahfa/nfox-auto-update-channel
+```
 
 Verify GitHub CLI authentication:
 
@@ -9,36 +14,42 @@ gh auth status
 gh api user --jq .login
 ```
 
-Create or verify the repository:
+Create or verify the update channel repository:
 
 ```powershell
-gh repo view <OWNER>/nfox-auto-update-demo
-gh repo create nfox-auto-update-demo --public --source . --remote origin --push
+gh repo view 3bdullahfa/nfox-auto-update-channel
 ```
+
+If the repository is missing, `tools/publish-update-channel-release.ps1` creates it with:
+
+```powershell
+gh repo create 3bdullahfa/nfox-auto-update-channel --public
+```
+
+The publishing script does not use `--source .` and does not push application source code to the update channel.
 
 Build release artifacts:
 
 ```powershell
-.\tools\build-release.ps1 -Version "1.0.1" -Owner "<OWNER>" -Repo "nfox-auto-update-demo"
+.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-channel"
 ```
 
 Publish:
 
 ```powershell
-.\tools\publish-github-release.ps1 -Owner "<OWNER>" -Repo "nfox-auto-update-demo" -Version "1.0.1" -ReleaseTitle "NFOX Demo v1.0.1"
+.\tools\publish-update-channel-release.ps1 -Owner "3bdullahfa" -Repo "nfox-auto-update-channel" -Version "1.0.2" -ReleaseTitle "NFOX Demo v1.0.2"
 ```
 
 Expected release assets:
 
 - `manifest.json`
-- `NFOX.DemoApp-1.0.1.zip`
-- `NFOX.Migrations-1.0.1.zip`
+- `NFOX.UpdatePackage-1.0.2.zip`
 - `checksums.txt`
 
-Use this URL in updater config:
+Use this stable URL in client/updater config:
 
 ```text
-https://github.com/<OWNER>/nfox-auto-update-demo/releases/download/v1.0.1/manifest.json
+https://github.com/3bdullahfa/nfox-auto-update-channel/releases/latest/download/manifest.json
 ```
 
-Private repositories require authenticated downloads, so do not use private GitHub Releases as a production update source for desktop clients unless a secure download strategy is added.
+Private repositories require authenticated downloads, so do not use private GitHub Releases as a production update source for desktop clients unless a secure download strategy is added. Production systems should use a private update server, protected API, signed URLs, and package signing.

@@ -34,6 +34,9 @@ public sealed class UpdateManifest
 
 public sealed class UpdatePackages
 {
+    [JsonPropertyName("updatePackage")]
+    public PackageInfo? UpdatePackage { get; set; }
+
     [JsonPropertyName("app")]
     public PackageInfo App { get; set; } = new();
 

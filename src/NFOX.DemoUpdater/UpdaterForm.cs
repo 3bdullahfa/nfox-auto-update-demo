@@ -126,61 +126,160 @@ public partial class UpdaterForm : Form
             Directory.CreateDirectory(downloadDirectory);
             Directory.CreateDirectory(backupDirectory);
 
-            var appPackagePath = Path.Combine(downloadDirectory, _manifest.Packages.App.FileName);
-            var migrationPackagePath = Path.Combine(downloadDirectory, _manifest.Packages.Migrations.FileName);
-
-            AppendStatus("Downloading app package.");
-            await _downloader.DownloadFileAsync(_manifest.Packages.App.DownloadUrl, appPackagePath, new Progress<double>(SetDownloadProgress), cancellationToken);
-            AppendStatus("Verifying app package SHA256.");
-            FileHashService.VerifySha256(appPackagePath, _manifest.Packages.App.Sha256);
-            AppendStatus("App package hash verified.");
-
-            AppendStatus("Downloading migration package.");
-            await _downloader.DownloadFileAsync(_manifest.Packages.Migrations.DownloadUrl, migrationPackagePath, new Progress<double>(SetDownloadProgress), cancellationToken);
-            AppendStatus("Verifying migration package SHA256.");
-            FileHashService.VerifySha256(migrationPackagePath, _manifest.Packages.Migrations.Sha256);
-            AppendStatus("Migration package hash verified.");
-
-            AppendStatus("Creating backup.");
-            var backupPath = _backupService.CreateBackup(_installDirectory, backupDirectory);
-            AppendStatus($"Backup created: {backupPath}");
-
-            var migrationsExtractDirectory = Path.Combine(downloadDirectory, $"migrations-{_manifest.LatestAppVersion}");
-            ZipService.ExtractToDirectory(migrationPackagePath, migrationsExtractDirectory, true);
-            AppendStatus("Applying database migrations.");
-            EnterCriticalStage();
-
-            var provider = DatabaseProviderFactory.Create(_config.DatabaseProvider);
-            var migrationLogger = new LogService("migration", _logger.LogDirectory);
-            var runner = new MigrationRunner(provider, _config.ConnectionString, migrationLogger);
-            var migrationResult = await Task.Run(() => runner.RunMigrations(migrationsExtractDirectory, _manifest.LatestAppVersion), cancellationToken);
-            progressMigration.Value = migrationResult.Success ? 100 : 0;
-            foreach (var migration in migrationResult.Migrations)
+            if (HasPackage(_manifest.Packages.UpdatePackage))
             {
-                AppendStatus($"{migration.Status}: {migration.ScriptName} - {migration.Message}");
+                await DownloadAndApplySinglePackageAsync(downloadDirectory, backupDirectory, cancellationToken);
             }
-
-            if (!migrationResult.Success)
+            else
             {
-                throw new InvalidOperationException(migrationResult.Message);
+                await DownloadAndApplySeparatePackagesAsync(downloadDirectory, backupDirectory, cancellationToken);
             }
-
-            AppendStatus("Database migrations completed.");
-            if (!ProcessService.WaitForProcessExit("NFOX.DemoApp.exe", TimeSpan.FromSeconds(5)))
-            {
-                throw new InvalidOperationException("NFOX.DemoApp.exe is still running. Close the application and run the updater again.");
-            }
-
-            var appExtractDirectory = Path.Combine(downloadDirectory, $"app-{_manifest.LatestAppVersion}");
-            ZipService.ExtractToDirectory(appPackagePath, appExtractDirectory, true);
-            AppendStatus("Replacing application files.");
-            ReplaceApplicationFiles(appExtractDirectory);
-
-            AppendStatus("Launching updated application.");
-            var appExe = Path.Combine(_installDirectory, "NFOX.DemoApp.exe");
-            ProcessService.StartProcess(appExe, null, _installDirectory);
-            AppendStatus("Update completed successfully.");
         });
+    }
+
+    private async Task DownloadAndApplySinglePackageAsync(string downloadDirectory, string backupDirectory, CancellationToken cancellationToken)
+    {
+        var updatePackage = _manifest!.Packages.UpdatePackage!;
+        var packagePath = Path.Combine(downloadDirectory, updatePackage.FileName);
+
+        await DownloadAndVerifyPackageAsync(updatePackage, packagePath, "update package", cancellationToken);
+        CreateBackup(backupDirectory);
+
+        var extractDirectory = Path.Combine(downloadDirectory, $"update-package-{_manifest.LatestAppVersion}");
+        ZipService.ExtractToDirectory(packagePath, extractDirectory, true);
+        var packageRoot = ResolveSinglePackageRoot(extractDirectory);
+        var appDirectory = Path.Combine(packageRoot, "app");
+        var migrationsDirectory = Path.Combine(packageRoot, "migrations");
+
+        if (!Directory.Exists(appDirectory))
+        {
+            throw new DirectoryNotFoundException($"Update package does not contain an app folder: {appDirectory}");
+        }
+
+        if (!Directory.Exists(migrationsDirectory))
+        {
+            throw new DirectoryNotFoundException($"Update package does not contain a migrations folder: {migrationsDirectory}");
+        }
+
+        await ApplyMigrationsAsync(migrationsDirectory, cancellationToken);
+        WaitForMainAppToExit();
+        ReplaceAndLaunchUpdatedApp(appDirectory);
+    }
+
+    private async Task DownloadAndApplySeparatePackagesAsync(string downloadDirectory, string backupDirectory, CancellationToken cancellationToken)
+    {
+        var appPackage = _manifest!.Packages.App;
+        var migrationPackage = _manifest.Packages.Migrations;
+        var appPackagePath = Path.Combine(downloadDirectory, appPackage.FileName);
+        var migrationPackagePath = Path.Combine(downloadDirectory, migrationPackage.FileName);
+
+        await DownloadAndVerifyPackageAsync(appPackage, appPackagePath, "app package", cancellationToken);
+        await DownloadAndVerifyPackageAsync(migrationPackage, migrationPackagePath, "migration package", cancellationToken);
+        CreateBackup(backupDirectory);
+
+        var migrationsExtractDirectory = Path.Combine(downloadDirectory, $"migrations-{_manifest.LatestAppVersion}");
+        ZipService.ExtractToDirectory(migrationPackagePath, migrationsExtractDirectory, true);
+        await ApplyMigrationsAsync(migrationsExtractDirectory, cancellationToken);
+        WaitForMainAppToExit();
+
+        var appExtractDirectory = Path.Combine(downloadDirectory, $"app-{_manifest.LatestAppVersion}");
+        ZipService.ExtractToDirectory(appPackagePath, appExtractDirectory, true);
+        ReplaceAndLaunchUpdatedApp(appExtractDirectory);
+    }
+
+    private async Task DownloadAndVerifyPackageAsync(PackageInfo package, string packagePath, string label, CancellationToken cancellationToken)
+    {
+        ValidatePackage(package, label);
+        AppendStatus($"Downloading {label}.");
+        await _downloader.DownloadFileAsync(package.DownloadUrl, packagePath, new Progress<double>(SetDownloadProgress), cancellationToken);
+        AppendStatus($"Verifying {label} SHA256.");
+        FileHashService.VerifySha256(packagePath, package.Sha256);
+        AppendStatus($"{label} hash verified.");
+    }
+
+    private void CreateBackup(string backupDirectory)
+    {
+        AppendStatus("Creating backup.");
+        var backupPath = _backupService.CreateBackup(_installDirectory, backupDirectory);
+        AppendStatus($"Backup created: {backupPath}");
+    }
+
+    private async Task ApplyMigrationsAsync(string migrationsDirectory, CancellationToken cancellationToken)
+    {
+        AppendStatus("Applying database migrations.");
+        EnterCriticalStage();
+
+        var provider = DatabaseProviderFactory.Create(_config!.DatabaseProvider);
+        var migrationLogger = new LogService("migration", _logger.LogDirectory);
+        var runner = new MigrationRunner(provider, _config.ConnectionString, migrationLogger);
+        var migrationResult = await Task.Run(() => runner.RunMigrations(migrationsDirectory, _manifest!.LatestAppVersion), cancellationToken);
+        progressMigration.Value = migrationResult.Success ? 100 : 0;
+        foreach (var migration in migrationResult.Migrations)
+        {
+            AppendStatus($"{migration.Status}: {migration.ScriptName} - {migration.Message}");
+        }
+
+        if (!migrationResult.Success)
+        {
+            throw new InvalidOperationException(migrationResult.Message);
+        }
+
+        AppendStatus("Database migrations completed.");
+    }
+
+    private static string ResolveSinglePackageRoot(string extractDirectory)
+    {
+        if (Directory.Exists(Path.Combine(extractDirectory, "app")))
+        {
+            return extractDirectory;
+        }
+
+        var candidates = Directory.GetDirectories(extractDirectory)
+            .Where(directory => Directory.Exists(Path.Combine(directory, "app")))
+            .OrderBy(directory => directory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        throw new DirectoryNotFoundException($"Update package does not contain the expected app folder under: {extractDirectory}");
+    }
+
+    private void WaitForMainAppToExit()
+    {
+        if (!ProcessService.WaitForProcessExit("NFOX.DemoApp.exe", TimeSpan.FromSeconds(5)))
+        {
+            throw new InvalidOperationException("NFOX.DemoApp.exe is still running. Close the application and run the updater again.");
+        }
+    }
+
+    private void ReplaceAndLaunchUpdatedApp(string appDirectory)
+    {
+        AppendStatus("Replacing application files.");
+        ReplaceApplicationFiles(appDirectory);
+
+        AppendStatus("Launching updated application.");
+        var appExe = Path.Combine(_installDirectory, "NFOX.DemoApp.exe");
+        ProcessService.StartProcess(appExe, null, _installDirectory);
+        AppendStatus("Update completed successfully.");
+    }
+
+    private static bool HasPackage(PackageInfo? package)
+    {
+        return package is not null &&
+            !string.IsNullOrWhiteSpace(package.FileName) &&
+            !string.IsNullOrWhiteSpace(package.DownloadUrl) &&
+            !string.IsNullOrWhiteSpace(package.Sha256);
+    }
+
+    private static void ValidatePackage(PackageInfo package, string label)
+    {
+        if (!HasPackage(package))
+        {
+            throw new InvalidOperationException($"Manifest {label} entry is incomplete.");
+        }
     }
 
     private void ReplaceApplicationFiles(string extractedAppDirectory)

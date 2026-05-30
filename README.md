@@ -8,12 +8,12 @@ Proof of concept for a Windows Forms accounting/ERP-style application that updat
 NFOX.DemoApp
   -> checks GitHub Releases automatically on startup
   -> shows an in-app update notification when a newer version exists
-  -> launches NFOX.DemoUpdater when the user clicks تحديث الآن
+  -> launches NFOX.DemoUpdater when the user clicks Check for Update
       -> discovers the latest GitHub release
-      -> downloads manifest.json from GitHub Releases
-      -> downloads ZIP packages
+      -> downloads manifest.json from the update channel
+      -> downloads NFOX.UpdatePackage-X.Y.Z.zip
       -> verifies SHA256
-      -> backs up current app folder
+      -> backs up the current app folder
       -> applies PostgreSQL migrations
       -> replaces app files
       -> launches updated NFOX.DemoApp
@@ -57,101 +57,98 @@ The setup script creates:
 - `nfox_schema_version`
 - `nfox_update_lock`
 
-## Run Version 1.0.0
+## Run Demo App
 
 ```powershell
 dotnet run --project .\src\NFOX.DemoApp\NFOX.DemoApp.csproj
 ```
 
-Expected values:
+The app checks GitHub automatically and shows an update notification when a newer release is available.
 
-- App version: `1.0.0`
-- Update name: `Initial Release`
-- Database version: `2026.05.30.001`
-- Customer rows: 3
-- The app checks GitHub automatically and shows an update notification when a newer release is available.
+## Production-like Update Distribution
+
+The source repository and the update distribution channel are separate:
+
+```text
+Source repository: 3bdullahfa/nfox-auto-update-demo
+Update channel:    3bdullahfa/nfox-auto-update-channel
+```
+
+The source repository can remain private or internal and contains code, tools, docs, migrations, and developer material. The public update channel must not receive source code commits. It should contain only a minimal README plus GitHub Releases assets.
+
+Expected release assets in the update channel:
+
+```text
+manifest.json
+NFOX.UpdatePackage-X.Y.Z.zip
+checksums.txt
+```
+
+`NFOX.UpdatePackage-X.Y.Z.zip` contains compiled output only:
+
+```text
+NFOX.UpdatePackage-X.Y.Z/
+  app/
+    NFOX.DemoApp.exe
+    appsettings.json
+    dependencies...
+  updater/
+    NFOX.DemoUpdater.exe
+    appsettings.json
+    dependencies...
+  migrations/
+    YYYY.MM.DD.NNN__description.sql
+  manifest.json
+```
+
+Do not upload `src/`, `.git/`, `database/`, `tools/`, `docs/`, `*.cs`, `*.csproj`, `*.sln`, or build scripts to the update channel. Public GitHub Releases are useful for this demo, but proprietary ERP binaries can still be reverse-engineered. Production systems should use a private update server, protected API, CDN or object storage with signed URLs, and package signing.
 
 ## GitHub Automatic Update Flow
 
-GitHub is the default update channel for this proof of concept:
+GitHub Releases in the distribution repository are the default update channel:
 
 ```text
 Owner: 3bdullahfa
-Repo: nfox-auto-update-demo
-Latest manifest: https://github.com/3bdullahfa/nfox-auto-update-demo/releases/latest/download/manifest.json
+Repo: nfox-auto-update-channel
+Latest manifest: https://github.com/3bdullahfa/nfox-auto-update-channel/releases/latest/download/manifest.json
 ```
 
-`NFOX.DemoApp` reads its local version from `appsettings.json`, checks GitHub Releases on startup, downloads the latest `manifest.json`, and compares versions using semantic version comparison.
+`NFOX.DemoApp` reads its local version from `appsettings.json`, checks the update channel on startup, downloads the latest `manifest.json`, and compares versions using semantic version comparison.
 
-If no update exists, the app shows:
-
-```text
-النظام محدث
-```
-
-If an update exists, the main app shows an update panel with:
-
-- Current version.
-- New version.
-- Update name.
-- Release notes.
-- Target database version.
-- Whether the update is required.
-
-The user starts the update from the main app by clicking:
-
-```text
-تحديث الآن
-```
-
-The updater then downloads packages from GitHub Releases, verifies SHA256, applies database migrations, replaces files only after migrations succeed, and relaunches the updated app.
+If an update exists, the main app shows the update panel with the current version, new version, update name, release notes, target database version, and required-update flag. The updater downloads the update package from GitHub Releases, verifies SHA256, applies database migrations, replaces files only after migrations succeed, and relaunches the updated app.
 
 Latest demo update:
 
 ```text
 Version: 1.0.2
-Update: إضافة شاشة الفواتير وملخص المبيعات
 DB target: 2026.06.01.001
-Visible change: Invoices / الفواتير tab with invoice data and sales summary.
+Visible change: Invoices tab with invoice data and sales summary.
 ```
 
-## Build Version 1.0.1
+## Build Release Artifacts
 
 ```powershell
-.\tools\build-release.ps1 -Version "1.0.1"
+.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-channel"
 ```
 
 Output:
 
 ```text
-artifacts/releases/v1.0.1/
+artifacts/releases/v1.0.2/
   manifest.json
-  NFOX.DemoApp-1.0.1.zip
-  NFOX.Migrations-1.0.1.zip
+  NFOX.UpdatePackage-1.0.2.zip
   checksums.txt
 ```
 
 ## Test Update Locally
 
-Local `file:///` manifest support remains available only for developer testing. Create a local release manifest with `file:///` package URLs:
+Local `file:///` manifest support remains available only for developer testing. Create a local release manifest with a `file:///` update package URL:
 
 ```powershell
-.\tools\create-local-release.ps1 -Version "1.0.1"
+.\tools\create-local-release.ps1 -Version "1.0.2"
 ```
 
-Copy the printed manifest URL into:
-
-```text
-src/NFOX.DemoUpdater/appsettings.json
-```
-
-or into the published updater `appsettings.json`, then start the update from the main app:
-
-```powershell
-dotnet run --project .\src\NFOX.DemoApp\NFOX.DemoApp.csproj
-```
-
-Click `Check for Update` or use the automatic startup check in `NFOX.DemoApp`; do not run the updater manually.
+Copy the printed manifest URL into the published updater `appsettings.json`, then start the update from the main app. Do not run the updater manually from PowerShell.
 
 ## Update from Main App UI
 
@@ -175,62 +172,60 @@ install/
 
 `NFOX.DemoApp` resolves `UpdaterPath` relative to the app executable directory. If the configured path is missing, it also searches common sibling layouts, including `..\NFOX.DemoUpdater\NFOX.DemoUpdater.exe`, `.\NFOX.DemoUpdater.exe`, and sibling published/source updater folders.
 
-The `Check for Update` button passes the install directory, current app version, and app config path to the updater. You should not need to run the updater manually from PowerShell.
+The `Check for Update` button passes the install directory, current app version, app config path, GitHub owner, GitHub repo, and manifest URL to the updater. You should not need to run the updater manually from PowerShell.
 
-To test from published folders:
+To create an install folder from a built package:
 
 ```powershell
 .\tools\build-release.ps1 -Version "1.0.0"
-.\tools\create-local-release.ps1 -Version "1.0.1"
 
 $install = "F:\NFOX_UPDATE\NFOX.AutoUpdateDemo\install"
+$stage = "F:\NFOX_UPDATE\NFOX.AutoUpdateDemo\artifacts\install-source\v1.0.0"
+Remove-Item $stage, $install -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive .\artifacts\releases\v1.0.0\NFOX.UpdatePackage-1.0.0.zip -DestinationPath $stage -Force
 New-Item -ItemType Directory -Path "$install\NFOX.DemoApp", "$install\NFOX.DemoUpdater" -Force
-Expand-Archive .\artifacts\releases\v1.0.0\NFOX.DemoApp-1.0.0.zip -DestinationPath "$install\NFOX.DemoApp" -Force
-Copy-Item .\artifacts\publish\v1.0.0\NFOX.DemoUpdater\* "$install\NFOX.DemoUpdater" -Recurse -Force
+Copy-Item "$stage\NFOX.UpdatePackage-1.0.0\app\*" "$install\NFOX.DemoApp" -Recurse -Force
+Copy-Item "$stage\NFOX.UpdatePackage-1.0.0\updater\*" "$install\NFOX.DemoUpdater" -Recurse -Force
 
 & "$install\NFOX.DemoApp\NFOX.DemoApp.exe"
 ```
 
-Then click `Check for Update`, click `Check` in the updater, then `Download and Update`.
+Then click `Check for Update`, click `Check` in the updater if needed, then `Download and Update`.
 
-## Publish to GitHub Releases
+## Publish to Update Channel
 
-Build artifacts with GitHub download URLs:
-
-```powershell
-.\tools\build-release.ps1 -Version "1.0.1" -Owner "<OWNER>" -Repo "nfox-auto-update-demo"
-```
-
-Publish the release:
+Build artifacts with update-channel download URLs:
 
 ```powershell
-.\tools\publish-github-release.ps1 -Owner "<OWNER>" -Repo "nfox-auto-update-demo" -Version "1.0.1" -ReleaseTitle "NFOX Demo v1.0.1"
+.\tools\build-release.ps1 -Version "1.0.2" -Owner "3bdullahfa" -Repo "nfox-auto-update-channel"
 ```
 
-If the owner is omitted, the script auto-detects it:
+Publish the release assets only:
 
 ```powershell
-gh api user --jq .login
+.\tools\publish-update-channel-release.ps1 -Owner "3bdullahfa" -Repo "nfox-auto-update-channel" -Version "1.0.2" -ReleaseTitle "NFOX Demo v1.0.2"
 ```
 
-The updater manifest URL for a public repo is:
+The script uses the existing authenticated GitHub CLI session, creates the update channel repository if missing, and never uses `--source .` or pushes the source tree.
+
+The updater manifest URL for the public update channel is:
 
 ```text
-https://github.com/<OWNER>/nfox-auto-update-demo/releases/latest/download/manifest.json
+https://github.com/3bdullahfa/nfox-auto-update-channel/releases/latest/download/manifest.json
 ```
 
 Detailed developer publishing steps are documented in [docs/developer-update-publishing-guide.md](docs/developer-update-publishing-guide.md).
 
 ## GitHub Repository Setup
 
-The proof of concept uses a public repository so the updater can download release assets without credentials:
+The proof of concept uses a public releases-only repository so the updater can download release assets without credentials:
 
 ```powershell
-gh repo view <OWNER>/nfox-auto-update-demo
-gh repo create nfox-auto-update-demo --public --source . --remote origin --push
+gh repo view 3bdullahfa/nfox-auto-update-channel
+gh release view v1.0.2 --repo 3bdullahfa/nfox-auto-update-channel
 ```
 
-For a private repository, release assets are not public. Do not embed GitHub credentials in the client app.
+For production, do not embed GitHub credentials in the client app.
 
 ## Troubleshooting
 
@@ -258,4 +253,5 @@ ALTER TABLE CUSTOMERS ADD TAX_NO VARCHAR2(50);
 - `logs/`, `downloads/`, `backups/`, and `artifacts/` are ignored by git.
 - The PostgreSQL password in configs is a local demo default only.
 - Public GitHub Releases are acceptable for this demo, not for production ERP updates.
-- Production should use a private update server, protected API, or signed URLs from storage such as Azure Blob Storage or S3-compatible storage.
+- Production should use a private update server, protected API, signed URLs from storage such as Azure Blob Storage or S3-compatible storage, and package signing.
+- Binaries can be reverse-engineered. A releases-only channel protects source distribution, not all intellectual property.

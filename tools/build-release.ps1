@@ -3,7 +3,7 @@ param(
     [string]$Version,
 
     [string]$Owner = "",
-    [string]$Repo = "nfox-auto-update-demo",
+    [string]$Repo = "nfox-auto-update-channel",
     [string]$Configuration = "Release"
 )
 
@@ -14,8 +14,13 @@ $artifactDir = Join-Path $root "artifacts\releases\$tag"
 $publishRoot = Join-Path $root "artifacts\publish\$tag"
 $appPublishDir = Join-Path $publishRoot "NFOX.DemoApp"
 $updaterPublishDir = Join-Path $publishRoot "NFOX.DemoUpdater"
-$appZip = Join-Path $artifactDir "NFOX.DemoApp-$Version.zip"
-$migrationZip = Join-Path $artifactDir "NFOX.Migrations-$Version.zip"
+$packageName = "NFOX.UpdatePackage-$Version"
+$packageStage = Join-Path $publishRoot $packageName
+$packageAppDir = Join-Path $packageStage "app"
+$packageUpdaterDir = Join-Path $packageStage "updater"
+$packageMigrationDir = Join-Path $packageStage "migrations"
+$packageManifestFile = Join-Path $packageStage "manifest.json"
+$updatePackageZip = Join-Path $artifactDir "$packageName.zip"
 $checksumsFile = Join-Path $artifactDir "checksums.txt"
 $manifestFile = Join-Path $artifactDir "manifest.json"
 $migrationSource = Join-Path $root "releases\$tag\migrations"
@@ -24,6 +29,21 @@ $manifestTemplateFile = Join-Path $root "releases\$tag\manifest.json"
 function Read-JsonFile {
     param([string]$Path)
     return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+}
+
+function Set-JsonProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value
+    )
+
+    if ($Object.PSObject.Properties.Name -contains $Name) {
+        $Object.$Name = $Value
+    }
+    else {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
 }
 
 function Get-UpdateName {
@@ -51,14 +71,47 @@ function Get-TargetDbVersion {
 }
 
 function Get-DownloadUrl {
-    param(
-        [string]$FileName
-    )
+    param([string]$FileName)
     if ([string]::IsNullOrWhiteSpace($Owner)) {
         return "PUT_GITHUB_ASSET_URL_HERE"
     }
 
     return "https://github.com/$Owner/$Repo/releases/download/$tag/$FileName"
+}
+
+function Set-UpdateChannelSettings {
+    param($Settings)
+
+    Set-JsonProperty -Object $Settings -Name "updateSource" -Value "GitHub"
+    Set-JsonProperty -Object $Settings -Name "gitHubUseLatestRelease" -Value $true
+
+    if (-not [string]::IsNullOrWhiteSpace($Owner)) {
+        Set-JsonProperty -Object $Settings -Name "gitHubOwner" -Value $Owner
+        Set-JsonProperty -Object $Settings -Name "gitHubRepo" -Value $Repo
+        Set-JsonProperty -Object $Settings -Name "manifestUrl" -Value "https://github.com/$Owner/$Repo/releases/latest/download/manifest.json"
+    }
+}
+
+function New-ReleaseManifest {
+    param([string]$PackageHash)
+
+    return [ordered]@{
+        appName = "NFOX ERP Demo"
+        updateName = $script:updateName
+        latestAppVersion = $Version
+        minimumRequiredAppVersion = $script:minimumRequiredAppVersion
+        targetDbVersion = $script:targetDbVersion
+        isRequired = $script:isRequired
+        releaseNotes = $script:releaseNotes
+        publishedAt = $script:publishedAt
+        packages = [ordered]@{
+            updatePackage = [ordered]@{
+                fileName = "$packageName.zip"
+                downloadUrl = Get-DownloadUrl -FileName "$packageName.zip"
+                sha256 = $PackageHash
+            }
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $migrationSource)) {
@@ -93,57 +146,38 @@ if (Test-Path -LiteralPath $manifestTemplateFile) {
     if ($null -ne $template.isRequired) { $isRequired = [bool]$template.isRequired }
     if ($template.publishedAt) { $publishedAt = $template.publishedAt }
 }
+
 $appSettingsFile = Join-Path $appPublishDir "appsettings.json"
 $appSettings = Read-JsonFile -Path $appSettingsFile
-$appSettings.appVersion = $Version
-$appSettings.updateName = $updateName
+Set-JsonProperty -Object $appSettings -Name "appVersion" -Value $Version
+Set-JsonProperty -Object $appSettings -Name "updateName" -Value $updateName
+Set-UpdateChannelSettings -Settings $appSettings
 $appSettings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $appSettingsFile -Encoding UTF8
 
 $updaterSettingsFile = Join-Path $updaterPublishDir "appsettings.json"
 $updaterSettings = Read-JsonFile -Path $updaterSettingsFile
-$updaterSettings.currentAppVersion = $Version
+Set-JsonProperty -Object $updaterSettings -Name "currentAppVersion" -Value $Version
+Set-UpdateChannelSettings -Settings $updaterSettings
 $updaterSettings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $updaterSettingsFile -Encoding UTF8
 
-Compress-Archive -Path (Join-Path $appPublishDir "*") -DestinationPath $appZip -Force
-$migrationStage = Join-Path $publishRoot "migrations"
-New-Item -ItemType Directory -Path $migrationStage -Force | Out-Null
-Copy-Item -Path (Join-Path $migrationSource "*.sql") -Destination $migrationStage -Force
-Compress-Archive -Path (Join-Path $migrationStage "*") -DestinationPath $migrationZip -Force
+New-Item -ItemType Directory -Path $packageAppDir, $packageUpdaterDir, $packageMigrationDir -Force | Out-Null
+Copy-Item -Path (Join-Path $appPublishDir "*") -Destination $packageAppDir -Recurse -Force
+Copy-Item -Path (Join-Path $updaterPublishDir "*") -Destination $packageUpdaterDir -Recurse -Force
+Copy-Item -Path (Join-Path $migrationSource "*.sql") -Destination $packageMigrationDir -Force
+Get-ChildItem -LiteralPath $packageStage -Filter "*.pdb" -Recurse | Remove-Item -Force
 
-$appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $appZip).Hash.ToLowerInvariant()
-$migrationHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $migrationZip).Hash.ToLowerInvariant()
+$internalManifest = New-ReleaseManifest -PackageHash "RECORDED_IN_RELEASE_MANIFEST"
+$internalManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $packageManifestFile -Encoding UTF8
 
-@(
-    "$appHash  $(Split-Path $appZip -Leaf)",
-    "$migrationHash  $(Split-Path $migrationZip -Leaf)"
-) | Set-Content -LiteralPath $checksumsFile -Encoding UTF8
+Compress-Archive -Path $packageStage -DestinationPath $updatePackageZip -Force
+$updatePackageHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $updatePackageZip).Hash.ToLowerInvariant()
 
-$manifest = [ordered]@{
-    appName = "NFOX ERP Demo"
-    updateName = $updateName
-    latestAppVersion = $Version
-    minimumRequiredAppVersion = $minimumRequiredAppVersion
-    targetDbVersion = $targetDbVersion
-    isRequired = $isRequired
-    releaseNotes = $releaseNotes
-    publishedAt = $publishedAt
-    packages = [ordered]@{
-        app = [ordered]@{
-            fileName = "NFOX.DemoApp-$Version.zip"
-            downloadUrl = Get-DownloadUrl -FileName "NFOX.DemoApp-$Version.zip"
-            sha256 = $appHash
-        }
-        migrations = [ordered]@{
-            fileName = "NFOX.Migrations-$Version.zip"
-            downloadUrl = Get-DownloadUrl -FileName "NFOX.Migrations-$Version.zip"
-            sha256 = $migrationHash
-        }
-    }
-}
+"$updatePackageHash  $(Split-Path $updatePackageZip -Leaf)" | Set-Content -LiteralPath $checksumsFile -Encoding UTF8
 
+$manifest = New-ReleaseManifest -PackageHash $updatePackageHash
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestFile -Encoding UTF8
 
 Write-Host "Release artifacts created in $artifactDir"
-Write-Host "App package: $appZip"
-Write-Host "Migration package: $migrationZip"
+Write-Host "Update package: $updatePackageZip"
+Write-Host "Checksums: $checksumsFile"
 Write-Host "Manifest: $manifestFile"
